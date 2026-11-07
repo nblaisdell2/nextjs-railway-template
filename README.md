@@ -303,7 +303,9 @@ npm run railway:destroy
 ```
 
 It lists what will be deleted, asks you to type the project name, and runs
-`railway delete`. Your GitHub repo and local files are untouched; run
+`railway delete`. The site goes offline immediately and Railway purges the
+project after a grace period (about 48 hours). Your GitHub repo and local files
+are untouched; run
 `npm run railway:setup` again to start fresh.
 
 ## Using as a template for new projects

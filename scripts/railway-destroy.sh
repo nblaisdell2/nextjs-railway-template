@@ -55,5 +55,5 @@ railway delete --project "$PROJECT_ID" --yes \
   || die "railway delete failed (accounts with 2FA may need --2fa-code; or delete it in the dashboard)"
 railway unlink >/dev/null 2>&1 || true
 echo ""
-echo "Deletion requested; Railway removes the project shortly. This folder is now unlinked."
+echo "Deleted: the site goes offline now; Railway purges the project after a grace period (about 48h). This folder is now unlinked."
 echo "To deploy again later: npm run railway:setup"

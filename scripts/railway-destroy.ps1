@@ -48,5 +48,5 @@ Write-Step 3 $total "railway delete"
 railway delete --project $projectId --yes
 if ($LASTEXITCODE -ne 0) { throw "railway delete failed (accounts with 2FA may need --2fa-code; or delete it in the dashboard)" }
 railway unlink *> $null
-Write-Host "`nDeletion requested; Railway removes the project shortly. This folder is now unlinked." -ForegroundColor Green
+Write-Host "`nDeleted: the site goes offline now; Railway purges the project after a grace period (about 48h). This folder is now unlinked." -ForegroundColor Green
 Write-Host "To deploy again later: npm run railway:setup"
