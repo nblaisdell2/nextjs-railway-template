@@ -1,0 +1,39 @@
+{
+  "name": "nextjs-test",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "migrate": "node --env-file-if-exists=.env db/migrate.mjs",
+    "db:ensure": "node --env-file-if-exists=.env db/ensure-database.mjs",
+    "setup": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-local.ps1",
+    "template:init": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/init-from-template.ps1",
+    "railway:setup": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-railway.ps1",
+    "railway:deploy": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/railway-deploy.ps1",
+    "railway:migrate": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/railway-migrate.ps1",
+    "railway:domain": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/railway-domain.ps1",
+    "railway:destroy": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/railway-destroy.ps1"
+  },
+  "dependencies": {
+    "next": "16.4.5",
+    "pg": "^8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.4.5",
+    "railway": "^3.16.0",
+    "typescript": "^5.9.3"
+  }
+}

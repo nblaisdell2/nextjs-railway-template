@@ -1,0 +1,31 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env files (never commit credentials)
+.env
+.env*.local
+
+# railway: plan artifacts written by `railway config plan --out`
+railway-plan*.json
+
+# typescript
+*.tsbuildinfo
