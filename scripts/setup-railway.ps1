@@ -6,9 +6,9 @@
 #    (creates it only after you confirm, or with -Yes)
 # 3) railway config plan (shown), then railway config apply
 #    -> Postgres, the web service (GitHub source, Dockerfile, health check,
-#       pre-deploy migrations, DATABASE_URL reference), custom domain
+#       pre-deploy migrations, DATABASE_URL reference)
 # 4) wait for the first deploy (stops with the push command if main isn't pushed yet)
-# 5) generate the *.up.railway.app domain if no custom domain is declared
+# 5) generate the *.up.railway.app domain; attach CUSTOM_DOMAIN if one is set
 # 6) print the live HTTPS URL (+ DNS records still needed for a custom domain)
 #
 #   -Yes   don't prompt: create the project if missing and pass --yes to
@@ -80,11 +80,11 @@ if (Test-RailwayLinked) {
 
 # --- 3. plan + apply the infrastructure ---
 Write-Step 3 $total "railway config plan / apply (.railway/railway.ts)"
-railway config plan
+Invoke-RailwayConfig plan
 if ($LASTEXITCODE -ne 0) { throw "railway config plan failed" }
 $applyArgs = @()
 if ($Yes) { $applyArgs += "--yes" }
-railway config apply @applyArgs
+Invoke-RailwayConfig apply @applyArgs
 if ($LASTEXITCODE -ne 0) { throw "railway config apply failed (or was declined)" }
 
 # --- 4. first deploy ---
@@ -105,63 +105,35 @@ if ($localHead -and ($remoteMain -notmatch [regex]::Escape($localHead))) {
     Write-Host "Note: your local HEAD isn't what's on origin/main. Railway deploys origin/main; push to ship local commits." -ForegroundColor Yellow
 }
 
-function Get-LatestDeployment {
-    $json = railway deployment list --service $WebService --limit 1 --json 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $json) { return $null }
-    $parsed = ($json | Out-String) | ConvertFrom-Json
-    if ($parsed -is [array]) { return $parsed | Select-Object -First 1 }
-    if ($parsed.deployments) { return $parsed.deployments | Select-Object -First 1 }
-    return $parsed
-}
+Wait-RailwayDeploy -NoStartHint ("Railway's GitHub app may not have access to '$githubRepo': " +
+    "open the project ('railway open') -> web -> Settings -> Source and connect the repo, " +
+    "then re-run this script. To deploy without GitHub right now: 'npm run railway:deploy'.")
 
-$deadline = (Get-Date).AddMinutes(20)
-$noDeployDeadline = (Get-Date).AddMinutes(3)
-$lastStatus = ""
-while ($true) {
-    $dep = Get-LatestDeployment
-    $status = if ($dep) { [string]$dep.status } else { "" }
-    if ($status -ne $lastStatus) {
-        Write-Host ("  {0}  {1}" -f (Get-Date -Format "HH:mm:ss"), $(if ($status) { $status } else { "waiting for Railway to start a deploy..." }))
-        $lastStatus = $status
-    }
-    if ($status -eq "SUCCESS") { break }
-    if ($status -in @("FAILED", "CRASHED")) {
-        throw "The deploy $status. See the logs: 'railway logs --service $WebService --build' (build) or 'railway logs --service $WebService' (runtime / pre-deploy migrations)."
-    }
-    if (-not $dep -and (Get-Date) -gt $noDeployDeadline) {
-        throw ("No deploy started. Make sure Railway's GitHub app can see '$githubRepo' " +
-               "(https://github.com/apps/railway-app/installations/new), then re-run this script. " +
-               "To deploy without GitHub right now: 'npm run railway:deploy'.")
-    }
-    if ((Get-Date) -gt $deadline) { throw "Timed out waiting for the deploy. Check 'railway logs --service $WebService' or the dashboard ('railway open')." }
-    Start-Sleep -Seconds 10
-}
-
-# --- 5. Railway-provided domain ---
-Write-Step 5 $total "Railway domain"
+# --- 5. domains ---
+# The generated domain is always created: with a custom domain it's how you
+# reach the site while DNS propagates.
+Write-Step 5 $total "Domains"
 $domain = Get-RailwayDomain
 if ($domain) {
-    Write-Host "Already has a Railway domain: $domain"
-} elseif ($customDomain) {
-    Write-Host "Custom domain declared ($customDomain); not generating a *.up.railway.app domain. Run 'npm run railway:domain' if you want one too."
+    Write-Host "Railway domain: $domain"
 } else {
-    railway domain --service $WebService
+    railway domain --service $WebService | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "railway domain failed" }
     $domain = Get-RailwayDomain
+    Write-Host "Generated Railway domain: $domain"
+}
+if ($customDomain) {
+    Write-Host ""
+    Add-RailwayCustomDomain $customDomain
 }
 
 # --- 6. done ---
 Write-Step 6 $total "Live"
 if ($domain) {
-    Write-Host ""
     Write-Host "Your site is live at:  https://$domain" -ForegroundColor Green
 }
 if ($customDomain) {
-    Write-Host ""
-    Write-Host "Custom domain https://$customDomain needs these DNS records at your DNS provider" -ForegroundColor Yellow
-    Write-Host "(BOTH the CNAME and the TXT; without the TXT Railway answers 404). Railway issues the"
-    Write-Host "HTTPS certificate automatically once DNS has propagated:"
-    railway domain status $customDomain --service $WebService
+    Write-Host "Custom domain:         https://$customDomain  (after the DNS records above are added and verified)" -ForegroundColor Green
 }
 Write-Host ""
 Write-Host "From now on: push to 'main' to deploy. Logs: 'railway logs --service $WebService'."

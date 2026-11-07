@@ -1,23 +1,20 @@
 #!/usr/bin/env bash
 # Generate the Railway domain, or attach a custom domain (Bash).
 #   ./scripts/railway-domain.sh                     -> generated *.up.railway.app domain
-#   ./scripts/railway-domain.sh app.example.com     -> custom domain   [--yes]
+#   ./scripts/railway-domain.sh app.example.com     -> custom domain
 #
-# Custom domain: the domain is written into CUSTOM_DOMAIN in .railway/railway.ts
-# and attached with `railway config apply`, so the file stays the source of
-# truth (a domain added only with `railway domain <d>` would be REMOVED by the
-# next `railway config apply`). Then it prints the DNS records to add at your
-# DNS provider: a CNAME (where traffic goes) AND a TXT (proves you own the
-# domain; without it Railway answers 404). Railway issues the Let's Encrypt
-# certificate automatically once DNS has propagated.
+# Custom domain: attaches it with `railway domain <domain>` (Railway's IaC can't
+# register custom domains), records it as CUSTOM_DOMAIN in .railway/railway.ts,
+# and prints the DNS records to add at your DNS provider: a CNAME (where
+# traffic goes) AND a TXT (proves you own the domain; without it Railway
+# answers 404). Railway issues the Let's Encrypt certificate automatically once
+# DNS has propagated.
 
 set -euo pipefail
 
 DOMAIN=""
-ASSUME_YES=false
 for arg in "$@"; do
   case "$arg" in
-    --yes) ASSUME_YES=true ;;
     -*) echo "Unknown arg: $arg" >&2; exit 1 ;;
     *) [ -z "$DOMAIN" ] || { echo "Only one domain at a time." >&2; exit 1; }; DOMAIN="$arg" ;;
   esac
@@ -46,34 +43,23 @@ fi
 DOMAIN="$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sed -E 's#^https?://##; s#/.*$##')"
 printf '%s' "$DOMAIN" | grep -Eq '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$' \
   || die "'$DOMAIN' doesn't look like a hostname (e.g. app.example.com)."
-TOTAL=4
+TOTAL=3
 
 step 1 $TOTAL "Checking Railway CLI + linked project"
 assert_railway_cli; assert_railway_login; assert_railway_linked
 
-step 2 $TOTAL "Writing CUSTOM_DOMAIN = \"$DOMAIN\" into .railway/railway.ts"
+step 2 $TOTAL "Attaching $DOMAIN to '$WEB_SERVICE'"
+add_custom_domain "$DOMAIN"
+
+step 3 $TOTAL "Recording CUSTOM_DOMAIN in .railway/railway.ts"
 PREVIOUS="$(get_railway_const CUSTOM_DOMAIN)"
-if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$DOMAIN" ]; then
-  echo "Replacing the previous custom domain '$PREVIOUS' (it will be detached)."
+if [ "$PREVIOUS" = "$DOMAIN" ]; then
+  echo "Already recorded."
+else
+  set_railway_const CUSTOM_DOMAIN "$DOMAIN"
+  echo "CUSTOM_DOMAIN = \"$DOMAIN\". Commit .railway/railway.ts so it stays recorded."
+  if [ -n "$PREVIOUS" ]; then
+    echo "The previous domain '$PREVIOUS' is still attached. To remove it:"
+    echo "  railway domain delete $PREVIOUS --service $WEB_SERVICE --yes"
+  fi
 fi
-set_railway_const CUSTOM_DOMAIN "$DOMAIN"
-
-step 3 $TOTAL "railway config plan / apply"
-railway config plan || die "railway config plan failed"
-APPLY_ARGS=()
-[ "$ASSUME_YES" = true ] && APPLY_ARGS+=(--yes)
-railway config apply ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"} \
-  || die "railway config apply failed (or was declined). .railway/railway.ts was already edited; revert with 'git checkout .railway/railway.ts' if needed."
-
-step 4 $TOTAL "DNS records for $DOMAIN"
-railway domain status "$DOMAIN" --service "$WEB_SERVICE" || die "railway domain status failed"
-
-echo ""
-echo "Add BOTH records above at your DNS provider:"
-echo "  - CNAME  $DOMAIN -> the Railway target shown above (routes the traffic)"
-echo "  - TXT    the verification record shown above (proves ownership; missing TXT = 404)"
-echo "Using Cloudflare? Keep '_acme-challenge' records DNS-only, and nested subdomains"
-echo "(a.b.example.com) DNS-only (grey cloud) unless you have Advanced Certificate Manager."
-echo "Railway issues the HTTPS certificate once DNS propagates. Check progress with:"
-echo "  railway domain status $DOMAIN --service $WEB_SERVICE"
-echo "Commit .railway/railway.ts so the domain stays declared."

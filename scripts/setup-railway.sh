@@ -7,9 +7,9 @@
 #    (creates it only after you confirm, or with --yes)
 # 3) railway config plan (shown), then railway config apply
 #    -> Postgres, the web service (GitHub source, Dockerfile, health check,
-#       pre-deploy migrations, DATABASE_URL reference), custom domain
+#       pre-deploy migrations, DATABASE_URL reference)
 # 4) wait for the first deploy (stops with the push command if main isn't pushed yet)
-# 5) generate the *.up.railway.app domain if no custom domain is declared
+# 5) generate the *.up.railway.app domain; attach CUSTOM_DOMAIN if one is set
 # 6) print the live HTTPS URL (+ DNS records still needed for a custom domain)
 #
 #   --yes   don't prompt: create the project if missing and pass --yes to
@@ -76,10 +76,10 @@ fi
 
 # --- 3. plan + apply the infrastructure ---
 step 3 $TOTAL "railway config plan / apply (.railway/railway.ts)"
-railway config plan || die "railway config plan failed"
+railway_config plan || die "railway config plan failed"
 APPLY_ARGS=()
 [ "$ASSUME_YES" = true ] && APPLY_ARGS+=(--yes)
-railway config apply ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"} || die "railway config apply failed (or was declined)"
+railway_config apply ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"} || die "railway config apply failed (or was declined)"
 
 # --- 4. first deploy ---
 step 4 $TOTAL "Waiting for the deploy"
@@ -99,62 +99,28 @@ if [ -n "$LOCAL_HEAD" ] && ! printf '%s' "$REMOTE_MAIN" | grep -q "$LOCAL_HEAD";
   echo "Note: your local HEAD isn't what's on origin/main. Railway deploys origin/main; push to ship local commits."
 fi
 
-latest_status() {
-  railway deployment list --service "$WEB_SERVICE" --limit 1 --json 2>/dev/null | node -e '
-    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
-      try {
-        let j = JSON.parse(s);
-        if (Array.isArray(j)) j = j[0]; else if (j && j.deployments) j = j.deployments[0];
-        process.stdout.write(j && j.status ? String(j.status) : "");
-      } catch { process.stdout.write(""); }
-    });' || true
-}
+wait_for_deploy "" "Railway's GitHub app may not have access to '$GITHUB_REPO': open the project ('railway open') -> web -> Settings -> Source and connect the repo, then re-run this script. To deploy without GitHub right now: 'npm run railway:deploy'."
 
-START=$(date +%s)
-LAST=""
-while true; do
-  STATUS="$(latest_status)"
-  if [ "$STATUS" != "$LAST" ]; then
-    echo "  $(date +%H:%M:%S)  ${STATUS:-waiting for Railway to start a deploy...}"
-    LAST="$STATUS"
-  fi
-  case "$STATUS" in
-    SUCCESS) break ;;
-    FAILED|CRASHED)
-      die "The deploy $STATUS. See the logs: 'railway logs --service $WEB_SERVICE --build' (build) or 'railway logs --service $WEB_SERVICE' (runtime / pre-deploy migrations)." ;;
-  esac
-  ELAPSED=$(( $(date +%s) - START ))
-  if [ -z "$STATUS" ] && [ "$ELAPSED" -gt 180 ]; then
-    die "No deploy started. Make sure Railway's GitHub app can see '$GITHUB_REPO' (https://github.com/apps/railway-app/installations/new), then re-run this script. To deploy without GitHub right now: 'npm run railway:deploy'."
-  fi
-  [ "$ELAPSED" -le 1200 ] || die "Timed out waiting for the deploy. Check 'railway logs --service $WEB_SERVICE' or the dashboard ('railway open')."
-  sleep 10
-done
-
-# --- 5. Railway-provided domain ---
-step 5 $TOTAL "Railway domain"
+# --- 5. domains ---
+# The generated domain is always created: with a custom domain it's how you
+# reach the site while DNS propagates.
+step 5 $TOTAL "Domains"
 DOMAIN="$(get_railway_domain)"
 if [ -n "$DOMAIN" ]; then
-  echo "Already has a Railway domain: $DOMAIN"
-elif [ -n "$CUSTOM_DOMAIN" ]; then
-  echo "Custom domain declared ($CUSTOM_DOMAIN); not generating a *.up.railway.app domain. Run 'npm run railway:domain' if you want one too."
+  echo "Railway domain: $DOMAIN"
 else
-  railway domain --service "$WEB_SERVICE" || die "railway domain failed"
+  railway domain --service "$WEB_SERVICE" >/dev/null || die "railway domain failed"
   DOMAIN="$(get_railway_domain)"
+  echo "Generated Railway domain: $DOMAIN"
+fi
+if [ -n "$CUSTOM_DOMAIN" ]; then
+  echo ""
+  add_custom_domain "$CUSTOM_DOMAIN"
 fi
 
 # --- 6. done ---
 step 6 $TOTAL "Live"
-if [ -n "$DOMAIN" ]; then
-  echo ""
-  echo "Your site is live at:  https://$DOMAIN"
-fi
-if [ -n "$CUSTOM_DOMAIN" ]; then
-  echo ""
-  echo "Custom domain https://$CUSTOM_DOMAIN needs these DNS records at your DNS provider"
-  echo "(BOTH the CNAME and the TXT; without the TXT Railway answers 404). Railway issues the"
-  echo "HTTPS certificate automatically once DNS has propagated:"
-  railway domain status "$CUSTOM_DOMAIN" --service "$WEB_SERVICE" || true
-fi
+[ -z "$DOMAIN" ] || echo "Your site is live at:  https://$DOMAIN"
+[ -z "$CUSTOM_DOMAIN" ] || echo "Custom domain:         https://$CUSTOM_DOMAIN  (after the DNS records above are added and verified)"
 echo ""
 echo "From now on: push to 'main' to deploy. Logs: 'railway logs --service $WEB_SERVICE'."

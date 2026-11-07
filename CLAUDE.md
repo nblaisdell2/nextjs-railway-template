@@ -54,10 +54,18 @@ running code (add before use, remove after the code stops using it).
 `app/page.tsx`, and add a migration that drops the `notes` table (don't delete
 `0001_init.sql` once it's been applied on Railway).
 
-**Change infrastructure** (env vars, replicas, health check, domains, new
-services). Edit `.railway/railway.ts`, run `railway config plan`, show the person
-the plan, and only then `railway config apply`. Pushing to GitHub does NOT apply
-infra changes.
+**Change infrastructure** (env vars, replicas, health check, new services).
+Edit `.railway/railway.ts`, run `railway config plan`, show the person the plan,
+and only then `railway config apply`. Pushing to GitHub does NOT apply infra
+changes. On Windows with the npm-installed CLI, `railway config` fails a bogus
+version check unless `$env:_` points at the real `railway.exe` (see README
+"Design decisions and gotchas"); `Invoke-RailwayConfig` in
+`scripts/lib/common.ps1` does this. Don't set values that equal Railway's
+defaults (e.g. restart policy): they show as a change on every apply.
+
+**Domains** are not declared in `service()`; Railway's IaC can't create them.
+Use `npm run railway:domain -- <domain>`, which attaches it and records
+`CUSTOM_DOMAIN` in `railway.ts`.
 
 ## Rules
 
@@ -67,12 +75,11 @@ infra changes.
   without `DATABASE_URL`. Use `lib/db.ts`.
 - Never hardcode the port: Railway injects `PORT`.
 - Keep `DATABASE_SSL=disable` for Railway's private network; `require` is only for
-  the public TCP proxy (`DATABASE_PUBLIC_URL`).
+  a temporary public TCP proxy, which doesn't exist by default.
+  Don't open one permanently; see README "Cost and teardown".
 - Removing a resource from `.railway/railway.ts` and applying DELETES it on
   Railway, including the Postgres database and its data. Never pass
   `--confirm-destructive` and never run `npm run railway:destroy` or
   `railway delete` without the person's explicit go-ahead.
-- Don't add custom domains with `railway domain <d>` alone; use
-  `npm run railway:domain -- <d>` so `.railway/railway.ts` stays the source of truth.
 - When you change a script, change both the `.ps1` and the `.sh` version.
 - Run `npm run lint` and `npm run build` before committing.

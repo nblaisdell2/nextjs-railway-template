@@ -32,4 +32,4 @@ CUSTOM_DOMAIN="$(get_railway_const CUSTOM_DOMAIN)"
 if [ -z "$DOMAIN" ] && [ -z "$CUSTOM_DOMAIN" ]; then
   echo "Deployed, but the service has no public domain yet. Run 'npm run railway:domain'."
 fi
-echo "(--ci returns once the build finishes; the new version takes traffic when /api/health passes. Watch it: 'railway logs --service $WEB_SERVICE'.)"
+echo "Logs: 'railway logs --service $WEB_SERVICE'."

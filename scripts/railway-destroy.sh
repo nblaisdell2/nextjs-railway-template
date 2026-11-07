@@ -43,8 +43,7 @@ echo "  - every variable in the project"
 echo "GitHub and your local files are not touched."
 echo ""
 echo "Want the data? Backups live inside the project and are deleted with it, so take a"
-echo "dump first: pg_dump \"<DATABASE_PUBLIC_URL of $DB_SERVICE>\" > backup.sql"
-echo "(copy the URL from 'railway variables --service $DB_SERVICE')."
+echo "pg_dump first (README -> 'Cost and teardown' -> 'Reaching the database from your laptop')."
 if [ "$ASSUME_YES" != true ]; then
   is_interactive || die "Refusing to delete without confirmation. Re-run interactively or pass --yes."
   read -r -p "Type the project name ('$PROJECT_NAME') to confirm: " answer

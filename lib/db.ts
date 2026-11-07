@@ -42,9 +42,9 @@ function stripSslmode(connectionString: string): string {
  * Decide TLS behaviour from DATABASE_SSL:
  *  - "disable" (or unset) -> no TLS. Correct for a local Postgres and for
  *    Railway's private network (postgres.railway.internal), which is already
- *    isolated to your project and does not speak TLS.
+ *    isolated to your project, so TLS adds nothing there.
  *  - "require" -> encrypted, certificate not verified. Use this only when
- *    connecting through Railway's public TCP proxy (DATABASE_PUBLIC_URL),
+ *    connecting through a Railway public TCP proxy (see README),
  *    whose certificate is self-signed.
  */
 function buildSsl(): false | { rejectUnauthorized: false } {

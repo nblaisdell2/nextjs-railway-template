@@ -17,8 +17,8 @@ git push origin main ──> Railway (GitHub integration)
 
 Browser ──HTTPS──> web service (*.up.railway.app or your domain, cert by Let's Encrypt)
                      │  DATABASE_URL = ${{postgres.DATABASE_URL}}  (reference variable)
-                     ▼  private network, no TLS needed
-                   postgres service (Railway-managed PostgreSQL + volume)
+                     ▼  private network only, no TLS needed
+                   postgres service (Railway-managed PostgreSQL + volume, not exposed publicly)
 ```
 
 **New to building sites?** You can do everything below by asking an AI coding
@@ -98,7 +98,7 @@ they work on any OS that has PowerShell 7.
 | `npm run template:init` | `init-from-template` | One-time, offline personalization (below) |
 | `npm run railway:setup` | `setup-railway` | First-time deploy, end to end (below) |
 | `npm run railway:deploy` | `railway-deploy` | Deploy your local folder now, without waiting for a push |
-| `npm run railway:migrate` | `railway-migrate` | Run migrations against the live database by hand |
+| `npm run railway:migrate` | `railway-migrate` | Re-run migrations against the live database without pushing |
 | `npm run railway:domain` | `railway-domain` | Generate the Railway domain, or attach a custom domain |
 | `npm run railway:destroy` | `railway-destroy` | Delete the Railway project (asks you to type its name) |
 
@@ -117,15 +117,16 @@ Offline: it only edits files, so you can review it with `git diff` before
 anything exists on Railway. It swaps the template's placeholder name for your
 project name (`.railway/railway.ts`, `package.json`, `package-lock.json`,
 `README.md`, `CLAUDE.md`), writes your GitHub `owner/repo` into
-`.railway/railway.ts`, and optionally writes a custom domain. Project names are
-3–30 lowercase letters, digits or hyphens, starting with a letter.
+`.railway/railway.ts`, and optionally records a custom domain (`CUSTOM_DOMAIN`)
+that `railway:setup` attaches. Project names are 3–30 lowercase letters, digits
+or hyphens, starting with a letter.
 
 **`railway:setup`** (`-Yes` / `--yes`). Safe to re-run.
 1. Checks prerequisites: Railway CLI and login (offers `railway login`), `gh auth status`, a git `origin` remote, and that `railway.ts` has been personalized.
 2. Links this folder to the Railway project named in `railway.ts` (`railway link`); if it doesn't exist, asks before creating it (`railway init`). Without a terminal it never creates a project unless you pass `-Yes`.
-3. `railway config plan` (always shown), then `railway config apply` (asks you to confirm).
-4. If nothing is pushed to `main` yet, prints the `git push` command and stops. Otherwise waits for the deploy Railway started from GitHub to finish.
-5. Generates the `*.up.railway.app` domain if you haven't declared a custom domain.
+3. `railway config plan` (always shown), then `railway config apply` (asks you to confirm). This creates Postgres and the web service; connecting the GitHub repo starts the first deploy.
+4. If nothing is pushed to `main` yet, prints the `git push` command and stops. Otherwise waits for that deploy to finish.
+5. Generates the `*.up.railway.app` domain if the service has none, and attaches `CUSTOM_DOMAIN` if one is set.
 6. Prints the live HTTPS URL and, for a custom domain, the DNS records to add.
 
 `-Yes` creates the project without asking and passes `--yes` to `railway config apply`.
@@ -135,9 +136,14 @@ Destructive changes (deleting a service, variable or volume) are never confirmed
 (respecting `.gitignore`, uncommitted changes included), builds it on Railway
 and prints the URL. Handy for a quick check; the next push to `main` replaces it.
 
-**`railway:migrate`**: runs `npm run migrate` *inside the running web
-container* over `railway ssh`, so it uses Railway's `DATABASE_URL` and never
-your local `.env`. You rarely need it, because every deploy already migrates.
+**`railway:migrate`** (`-Ssh` / `--ssh`): you rarely need it, because every
+deploy already migrates. By default it runs `railway redeploy` on the web
+service, which re-runs the pre-deploy `npm run migrate` with Railway's
+`DATABASE_URL` (never your local `.env`), waits for it, and prints the
+migration output. With `-Ssh` it instead runs `npm run migrate` inside the
+running container over `railway ssh` (no restart), which needs an SSH key on
+your machine (`ssh-keygen -t ed25519`). Either way it runs the migrations in the
+*deployed* image, so push new migration files first.
 
 **`railway:domain [domain]`**: see [Custom domain](#custom-domain).
 
@@ -172,7 +178,8 @@ push, Railway applies it before the new code takes traffic.
 | What changes | Who applies it | How |
 |--------------|----------------|-----|
 | **Code** (pages, APIs, migrations) | GitHub → Railway | `git push` to `main`. Railway builds the Dockerfile, migrates, health-checks, swaps traffic. Railway serializes deploys itself. |
-| **Infrastructure** (services, variables, health check, domains, replicas) | Your laptop | Edit `.railway/railway.ts`, then `railway config plan` and `railway config apply` |
+| **Infrastructure** (services, variables, health check, replicas) | Your laptop | Edit `.railway/railway.ts`, then `railway config plan` and `railway config apply` |
+| **Domains** | Your laptop | `npm run railway:domain [domain]` (uses `railway domain`; Railway's IaC can't create domains) |
 | **Secrets / credentials** | Railway | Postgres credentials are generated by Railway and referenced by name; nothing sensitive is in git or in the image |
 | **Quick manual deploy** | Your laptop | `npm run railway:deploy` |
 
@@ -183,18 +190,20 @@ handles deploy-on-push.
 
 ### What `.railway/railway.ts` declares
 
-- `postgres("postgres")`: a managed PostgreSQL service with its own volume.
+- `postgres("postgres")`: a managed PostgreSQL service with its own volume,
+  reachable only over the private network (`postgres.railway.internal`).
 - `service("web")`, which:
   - deploys from your GitHub repo's `main` branch
   - is built from the `Dockerfile`
   - runs `npm run migrate` as its pre-deploy command
   - waits for `/api/health` to return 200 (120 s timeout)
-  - restarts on failure (up to 10 times) and runs 1 replica
+  - runs 1 replica, with Railway's default restart policy (on failure, up to 10 times)
   - gets `DATABASE_URL` as a reference to `postgres.DATABASE_URL`, plus `DATABASE_SSL=disable` and `NODE_ENV=production`
-  - gets your custom domain, if you set one
 - `project("<your project>")` containing both.
 
-Railway's private network address for Postgres is `postgres.railway.internal`.
+It also holds `PROJECT_NAME`, `GITHUB_REPO` and `CUSTOM_DOMAIN`, which the npm
+scripts read. Domains themselves are attached by the scripts, not declared in
+`service()`, because Railway's IaC can't register custom domains.
 Railway injects `PORT` into the web container; the Next.js server listens on it.
 
 ### Logs and status
@@ -221,10 +230,12 @@ Remember each replica opens its own database pool (`DATABASE_POOL_MAX`, default 
    ```bash
    npm run railway:domain -- app.example.com
    ```
-   This writes `CUSTOM_DOMAIN = "app.example.com"` into `.railway/railway.ts`,
-   runs `railway config plan` / `apply` to attach it, and prints the DNS records
-   from `railway domain status`. Commit `railway.ts` afterwards. You can also set
-   it from the start: `npm run template:init -- -ProjectName my-app -CustomDomain app.example.com`.
+   This runs `railway domain app.example.com --service web`, prints the DNS
+   records from `railway domain status`, and records
+   `CUSTOM_DOMAIN = "app.example.com"` in `.railway/railway.ts` (commit it).
+   You can also set it from the start with
+   `npm run template:init -- -ProjectName my-app -CustomDomain app.example.com`;
+   `railway:setup` then attaches it after the first deploy.
 2. At your DNS provider, add **both** records shown:
    - a **CNAME** from your domain to the Railway target (routes the traffic), and
    - a **TXT** record (proves you own the domain). Without the TXT, Railway answers **404** even when the CNAME resolves.
@@ -241,7 +252,12 @@ certificate only covers one level of subdomain. A root domain needs CNAME
 flattening (Cloudflare does this automatically for the apex).
 
 Without an argument, `npm run railway:domain` generates the free
-`*.up.railway.app` domain (if the service doesn't have one yet).
+`*.up.railway.app` domain (if the service doesn't have one yet). The generated
+domain keeps working alongside your custom one.
+
+Switching domains: running `railway:domain` with a new domain attaches it and
+updates `CUSTOM_DOMAIN`, but leaves the old one attached; it prints the
+`railway domain delete <old> --service web --yes` command to remove it.
 
 ## Cost and teardown
 
@@ -260,9 +276,25 @@ railway postgres pitr enable --service postgres          # continuous point-in-t
 
 The same controls are on the Postgres service's **Backups** tab in the dashboard.
 Backups belong to the project, so **deleting the project deletes them too.**
-Before tearing down, dump anything you want to keep:
-`pg_dump "<DATABASE_PUBLIC_URL>" > backup.sql` (the URL is in
-`railway variables --service postgres`).
+
+**Reaching the database from your laptop** (for `pg_dump`, a GUI client, or a
+one-off query). The database has no public address by default. Either:
+
+- `railway connect postgres`: opens `psql` through an SSH tunnel (needs `psql`
+  and an SSH key on your machine), or
+- open a temporary public TCP proxy, use it, then close it:
+  ```bash
+  railway tcp-proxy create --port 5432 --service postgres
+  railway variables --service postgres   # PGUSER, PGPASSWORD, PGDATABASE,
+                                         # RAILWAY_TCP_PROXY_DOMAIN, RAILWAY_TCP_PROXY_PORT
+  pg_dump "postgresql://PGUSER:PGPASSWORD@PROXY_DOMAIN:PROXY_PORT/PGDATABASE?sslmode=require" > backup.sql
+  railway tcp-proxy list --service postgres  # get the proxy id, then:
+  railway tcp-proxy delete <id> --service postgres --yes
+  ```
+  (Substitute the values; URL-encode the password if it has special characters.)
+  If you point this app or `npm run migrate` at that URL, set `DATABASE_SSL=require`.
+
+Dump anything you want to keep before tearing down.
 
 **Tear down everything:**
 
@@ -309,11 +341,13 @@ should you: read what they print before saying yes.
 - **`PORT` is injected by Railway.** Never hardcode `3000` in the server. The
   Dockerfile's `PORT=3000` is only the fallback for a plain `docker run`, and
   Next's standalone `server.js` reads `PORT` and `HOSTNAME=0.0.0.0`.
-- **The private network has no TLS, so `DATABASE_SSL=disable` is correct there.**
-  `postgres.railway.internal` is only reachable from inside your project.
-  Use `DATABASE_SSL=require` only when connecting through Railway's public TCP
-  proxy (`DATABASE_PUBLIC_URL`, e.g. a GUI client on your laptop). The proxy's
-  certificate is self-signed, so `require` encrypts without verifying it.
+- **The private network doesn't need TLS, so `DATABASE_SSL=disable` is correct there.**
+  `postgres.railway.internal` is only reachable from inside your project, and the
+  database has no public address unless you open a TCP proxy. Use
+  `DATABASE_SSL=require` when connecting through such a proxy: the proxy also
+  accepts unencrypted connections, so `require` is what keeps traffic across the
+  internet encrypted. Its certificate is self-signed, so `require` encrypts
+  without verifying it.
 - **`sslmode` in the URL is stripped on purpose.** `pg` turns `?sslmode=...` into
   its own TLS settings (newer versions treat `sslmode=require` as full
   verification), which would silently override `DATABASE_SSL`. One switch, no surprises.
@@ -328,33 +362,48 @@ should you: read what they print before saying yes.
   `node --env-file-if-exists=.env`; inside the container there's no `.env`, and
   Node prints a harmless "not found" note before using Railway's variables.
 - **PowerShell and flags containing `=`.** Quote them: `"--flag=value"`. Unquoted,
-  PowerShell can split the argument before the CLI sees it. The scripts avoid
-  `=` flags for this reason.
+  PowerShell can split the argument before the CLI sees it. The PowerShell
+  scripts avoid `=` flags for this reason.
 - **Custom domains need both CNAME and TXT**, and Cloudflare proxying has limits
   (see [Custom domain](#custom-domain)).
 - **Railway does not read `.railway/` during deploys.** A push ships code only;
   `railway config apply` is the only way infrastructure changes land.
-- **`railway.ts` is the whole truth.** Removing a resource from it and applying
-  **deletes** it on Railway, including the Postgres database. The plan marks
-  these as destructive and asks again; read it.
-- **Domains added outside `railway.ts` get removed.** A custom domain added only
-  with `railway domain <d>` or in the dashboard is not in the file, so the next
-  `railway config apply` would remove it. `npm run railway:domain` writes the
-  file for you. The generated `*.up.railway.app` domain isn't managed by the file
-  and is left alone.
+- **`railway.ts` is the whole truth for services and variables.** Removing a
+  resource from it and applying **deletes** it on Railway, including the Postgres
+  database. The plan marks these as destructive and asks again; read it.
+- **Railway's IaC can't create custom domains.** Declaring one in `service({ domains })`
+  fails the plan with "Custom-domain registration is not supported" until the
+  domain already exists, so this template attaches domains with `railway domain`
+  (via `npm run railway:domain`) and keeps `CUSTOM_DOMAIN` as a plain setting.
+  Domains not declared in the file are left alone by `railway config apply`.
+- **Don't declare settings that equal Railway's defaults.** Railway stores a
+  default as "unset", so e.g. `restartPolicyType: "ON_FAILURE"` shows up as a
+  change, and triggers a redeploy, on every `railway config apply`. If
+  `railway config plan` keeps showing the same change, that's why.
+- **`RAILWAY_PUBLIC_DOMAIN` switches to your custom domain** once one exists. The
+  scripts read the generated domain from `railway domain list` instead.
 - **`railway run` executes on your laptop.** It injects Railway's variables, but
   `postgres.railway.internal` doesn't resolve outside Railway, so
-  `railway run npm run migrate` can't reach the database. `railway:migrate` uses
-  `railway ssh` into the container instead.
+  `railway run npm run migrate` can't reach the database. `railway:migrate`
+  redeploys (or uses `railway ssh` with `-Ssh`) instead.
+- **Windows: `railway config` needs a workaround with an npm-installed CLI.** The
+  `railway/iac` package checks the CLI version by spawning `railway` without a
+  shell, which can't run npm's `railway.cmd` shim, so `railway config plan` fails
+  with "requires Railway CLI 5.42.1 or newer" even on a newer CLI. The scripts
+  work around it (`Invoke-RailwayConfig` / `railway_config` in `scripts/lib/`).
+  Running `railway config ...` by hand on Windows: in PowerShell, first run
+  `$env:_ = "$(npm root -g)\@railway\cli\bin\railway.exe"`, or install the CLI
+  with a native installer (e.g. `scoop install railway`) instead of npm.
 
 ## Manual steps in the Railway dashboard
 
-- **GitHub access, once per account:** Railway's GitHub app must be allowed to
-  see your repo for deploy-on-push to work. If `railway:setup` reports that no
-  deploy started, install or configure the Railway app in GitHub
-  (Railway dashboard → Account Settings → GitHub, or GitHub → Settings →
-  Applications) and grant it access to the repo, then re-run `npm run railway:setup`.
-- **Billing / plan:** creating a project needs an account on a plan that allows
-  it (trial or paid). Railway's own sign-up flow handles this.
+Normally none: `railway:setup` does everything from the CLI. Check these if it stops:
+
+- **Plan / billing:** creating a project needs an active plan. If `railway init`
+  fails with "Your trial has expired", pick a plan in the dashboard and re-run.
+- **GitHub access:** Railway's GitHub app must be able to see your repo for
+  deploy-on-push. If `railway:setup` reports that no deploy started, open the
+  project (`railway open`) → web → Settings → Source, connect the repo (granting
+  the Railway app access when GitHub asks), then re-run `npm run railway:setup`.
 - **Optional:** backup schedules, usage limits and alerts are easiest to set in
   the dashboard (`railway open`).

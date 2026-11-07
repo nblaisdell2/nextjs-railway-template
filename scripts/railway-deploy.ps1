@@ -32,4 +32,4 @@ if ($customDomain) { Write-Host "Custom domain:  https://$customDomain" -Foregro
 if (-not $domain -and -not $customDomain) {
     Write-Host "Deployed, but the service has no public domain yet. Run 'npm run railway:domain'." -ForegroundColor Yellow
 }
-Write-Host "(--ci returns once the build finishes; the new version takes traffic when /api/health passes. Watch it: 'railway logs --service $WebService'.)"
+Write-Host "Logs: 'railway logs --service $WebService'."

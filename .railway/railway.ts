@@ -23,12 +23,16 @@ const PROJECT_NAME = "nextjs-test";
 const GITHUB_REPO = "OWNER/nextjs-test";
 // Optional custom domain, e.g. "app.example.com". Leave "" to use only the
 // generated *.up.railway.app domain. See "Custom domain" in the README.
+// Read by the npm scripts, which attach it with `railway domain`: Railway's IaC
+// can't register custom domains itself (plan fails with "Custom-domain
+// registration is not supported"), so it isn't passed to service() below.
 const CUSTOM_DOMAIN = "";
 // ----------------------------------------------------------------------------
 
 export default defineRailway(() => {
-  // Managed PostgreSQL. Railway generates the credentials and exposes them as
-  // variables on this service (DATABASE_URL, DATABASE_PUBLIC_URL, PG*).
+  // Managed PostgreSQL with its own volume. Railway generates the credentials
+  // and exposes them as variables on this service (DATABASE_URL, PG*). It is
+  // only reachable over the private network: no public TCP proxy.
   const db = postgres("postgres");
 
   const web = service("web", {
@@ -45,23 +49,23 @@ export default defineRailway(() => {
       // Traffic only moves to a new deploy once this returns 200.
       healthcheckPath: "/api/health",
       healthcheckTimeout: 120,
-      // Restart the container if it crashes.
-      restartPolicyType: "ON_FAILURE",
-      restartPolicyMaxRetries: 10,
+      // Restart policy: Railway's default (restart on failure, up to 10 times)
+      // is what we want. Don't set restartPolicyType / restartPolicyMaxRetries
+      // to those same values: Railway stores the default as "unset", so the
+      // plan would show a change, and redeploy, on every apply.
     },
 
     // One instance. Raise this (or use `railway scale`) to run more.
     replicas: 1,
 
-    // Custom domains to attach. The generated *.up.railway.app domain is not
-    // managed here; `npm run railway:setup` / `railway:domain` creates it.
-    domains: CUSTOM_DOMAIN ? [CUSTOM_DOMAIN] : [],
+    // Domains (generated *.up.railway.app and CUSTOM_DOMAIN) are attached by
+    // `npm run railway:setup` / `npm run railway:domain`, not declared here.
 
     env: {
       // Reference variable: resolves to ${{postgres.DATABASE_URL}}, the
       // private-network URL (postgres.railway.internal). Never stored in git.
       DATABASE_URL: db.env.DATABASE_URL,
-      // The private network has no TLS. See lib/db.ts.
+      // The private network is isolated to this project; no TLS needed. See lib/db.ts.
       DATABASE_SSL: "disable",
       NODE_ENV: "production",
     },

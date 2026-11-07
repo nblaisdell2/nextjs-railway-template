@@ -37,8 +37,7 @@ Write-Host "  - every variable in the project"
 Write-Host "GitHub and your local files are not touched."
 Write-Host ""
 Write-Host "Want the data? Backups live inside the project and are deleted with it, so take a"
-Write-Host "dump first: pg_dump `"<DATABASE_PUBLIC_URL of $DbService>`" > backup.sql"
-Write-Host "(copy the URL from 'railway variables --service $DbService')."
+Write-Host "pg_dump first (README -> 'Cost and teardown' -> 'Reaching the database from your laptop')."
 if (-not $Yes) {
     if (-not (Test-Interactive)) { throw "Refusing to delete without confirmation. Re-run interactively or pass -Yes." }
     $answer = Read-Host "Type the project name ('$projectName') to confirm"

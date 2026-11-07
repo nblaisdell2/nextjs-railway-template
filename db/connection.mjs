@@ -3,7 +3,7 @@
 //
 //   DATABASE_SSL=disable (default)  no TLS: local Postgres, Railway private network
 //   DATABASE_SSL=require            TLS without cert verification: Railway's
-//                                   public TCP proxy (DATABASE_PUBLIC_URL)
+//                                   public TCP proxy (see README)
 
 /** TLS option for pg, driven only by DATABASE_SSL. */
 export function sslOption() {
