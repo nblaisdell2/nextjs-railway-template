@@ -42,9 +42,9 @@ cd my-new-app
 # 2. Start a local Postgres (skip if you already have one; flags explained below):
 docker run --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16
 
-# 3. Onboard: npm install, write .env, create the local DB, migrate, and
-#    personalize the project (name + GitHub repo, taken from the folder name).
-npm run setup            # prompts for the local Postgres password ("postgres" above)
+# 3. Onboard: npm install, write .env, create a local DB named after this project,
+#    migrate, and personalize the project (name + GitHub repo, from the folder name).
+npm run setup            # asks for the local Postgres password ("postgres" above); typing is hidden
 
 # 4. Run it locally:
 npm run dev              # http://localhost:3000
@@ -77,6 +77,7 @@ What the `docker run` flags mean:
 | `db/migrations/*.sql` | Your database schema, as numbered SQL files applied in order |
 | `db/migrate.mjs` | Forward-only migration runner (records applied files in `schema_migrations`) |
 | `db/ensure-database.mjs` | Creates the local database if it's missing (local dev only) |
+| `db/choose-database-name.mjs` | Picks this project's local database name during `npm run setup` (local dev only) |
 | `.railway/railway.ts` | **Railway infrastructure-as-code**: the Postgres service, the web service, its settings, and domains |
 | `Dockerfile` | Multi-stage build of the standalone Next.js server; runs as a non-root user and listens on `PORT` |
 | `scripts/` | Setup and Railway helper scripts, each in PowerShell (`.ps1`) and Bash (`.sh`) |
@@ -103,14 +104,21 @@ they work on any OS that has PowerShell 7.
 | `npm run railway:destroy` | `railway-destroy` | Delete the Railway project (asks you to type its name) |
 
 Pass arguments after `--`, e.g. `npm run template:init -- -ProjectName my-app -GitHubRepo me/my-app`.
+(`npm run setup` is the exception: it works with or without `--`.)
 The Bash versions take `--flag value` style arguments (shown below).
 
-**`setup`** (`-DbPassword`, `-DbName test`, `-DbPort 5432` / `--password=`, `--db-name=`, `--db-port=`)
-1. Asks for the local Postgres password (hidden input).
+**`setup`** (`-DbName`, `-DbPort` / `--db-name=`, `--db-port=`, in any order; both optional)
+1. Asks for the local Postgres password. Your typing is hidden, and the password can't be passed as an argument. For automated runs, set the standard `PGPASSWORD` environment variable instead.
 2. `npm install`.
-3. Writes `.env` from `.env.example` with a URL-encoded password and `DATABASE_SSL=disable`.
+3. Chooses the database name and writes `.env` from `.env.example` with a URL-encoded password and `DATABASE_SSL=disable`.
 4. `npm run db:ensure`, then `npm run migrate`.
 5. Runs `template:init` with the folder name as the project name and `<your GitHub login>/<folder>` as the repo.
+
+The database name is whichever of these applies first, so each project gets its own database:
+- the name you passed with `-DbName`, used as is (an existing database with that name is reused);
+- the name already in this project's `.env`, so re-running setup never creates another database;
+- the project folder's name, with other characters turned into underscores (`my-new-app` becomes `my_new_app`);
+- that folder-based name plus a random suffix (`my_new_app_3fa9`) if it's already taken on your Postgres server.
 
 **`template:init`** (`-ProjectName`, `-GitHubRepo`, `-CustomDomain` / `--name`, `--repo`, `--custom-domain`)
 Offline: it only edits files, so you can review it with `git diff` before
@@ -158,7 +166,7 @@ to dump the data first, asks you to type the project name, then runs
 ```bash
 npm install
 docker start pg             # or the docker run command from Quick start
-cp .env.example .env        # then set the password + database name in DATABASE_URL
+cp .env.example .env        # then set the password + a database name unique to this project in DATABASE_URL
 npm run db:ensure           # create the database if it doesn't exist
 npm run migrate             # apply migrations
 npm run dev                 # http://localhost:3000
@@ -363,6 +371,16 @@ should you: read what they print before saying yes.
 - **Node doesn't load `.env` by itself.** The npm scripts use
   `node --env-file-if-exists=.env`; inside the container there's no `.env`, and
   Node prints a harmless "not found" note before using Railway's variables.
+- **Passwords are never command-line arguments.** Arguments stay visible in your
+  terminal, your shell history and npm's `> pwsh ...` command echo, so
+  `npm run setup` always asks with hidden input (or reads `PGPASSWORD`).
+- **npm consumes `-Flag` arguments unless they come after `--`.**
+  `npm run setup -DbName foo` reaches the script as just `foo`. `setup` handles
+  this by sorting bare values: all digits is the port, anything else is the
+  database name. The other scripts need the `--`; without it, a switch like
+  `-Yes` or `-Ssh` silently disappears. One limit: an old-style
+  `npm run setup -DbPassword secret` without `--` delivers only `secret`, which
+  setup can't tell apart from a database name, so don't type passwords there.
 - **PowerShell and flags containing `=`.** Quote them: `"--flag=value"`. Unquoted,
   PowerShell can split the argument before the CLI sees it. The PowerShell
   scripts avoid `=` flags for this reason.
